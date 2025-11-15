@@ -21,6 +21,8 @@ The user interaction with this agent will be via a webapp in the browser.
 
 The agent should also implement using the [x402 protocol for buyers](https://x402.gitbook.io/x402/getting-started/quickstart-for-buyers)/
 
+Also read https://docs.base.org/base-app/agents/x402-agents
+
 ### Wallets
 We will use [Locus](https://docs.paywithlocus.com/getting-started) to handle the payments between the different agents.
 
