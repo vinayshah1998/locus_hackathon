@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import * as readline from 'readline';
-import { creditCheckingTools, executeCreditTool } from './tools.js';
+import { creditCheckingServer } from './tools.js';
 
 // Enable debug mode to see all message types
 const DEBUG_MODE = process.env.DEBUG === 'true';
@@ -13,8 +13,8 @@ async function main(): Promise<void> {
       console.log('🐛 Debug mode enabled - showing all message types\n');
     }
 
-    // 1. Configure MCP connection to Locus
-    console.log('Configuring Locus MCP connection...');
+    // 1. Configure MCP connections (Locus + Credit Checking)
+    console.log('Configuring MCP connections...');
     const mcpServers = {
       'locus': {
         type: 'http' as const,
@@ -22,22 +22,70 @@ async function main(): Promise<void> {
         headers: {
           'Authorization': `Bearer ${process.env.LOCUS_API_KEY}`
         }
-      }
+      },
+      'credit-checking': creditCheckingServer  // Add credit checking MCP server
     };
 
     const options = {
       mcpServers,
-      tools: creditCheckingTools, // Add credit checking tools
       allowedTools: [
-        'mcp__locus__*',      // Allow all Locus tools
+        'mcp__locus__*',                      // Allow all Locus tools
         'mcp__list_resources',
         'mcp__read_resource',
-        'get_credit_score',   // Credit checking tools
-        'get_payment_history',
-        'report_payment',
-        'check_credit_server'
+        'mcp__credit-checking__*'             // Allow all credit checking tools
       ],
       apiKey: process.env.ANTHROPIC_API_KEY,
+      systemPrompt: `You are a payment agent with access to the following tools:
+
+Credit Checking Tools (via MCP):
+- mcp__credit-checking__check_credit_server - Check if the credit checking server is running
+- mcp__credit-checking__get_credit_score - Get credit score for an agent (0-100 scale) [$0.002 USD via x402]
+- mcp__credit-checking__get_payment_history - View detailed payment history for an agent [$0.001 USD via x402]
+- mcp__credit-checking__report_payment - Report a payment event to update credit scores [FREE]
+
+Locus Payment Tools (via MCP):
+- mcp__locus__send_to_address - Send USDC to any wallet address
+- mcp__locus__send_to_contact - Send USDC to whitelisted contacts
+- mcp__locus__get_payment_context - Check wallet balance and payment context
+
+X402 PAYMENT PROTOCOL:
+The credit checking tools use x402 protocol - they require payment before returning data. Here's how to handle it:
+
+1. FIRST ATTEMPT: Call the credit checking tool normally (without payment params)
+2. PAYMENT REQUIRED: If you receive "❌ Payment Required", the response contains:
+   - Payment address (recipient wallet)
+   - Payment amount (e.g., "0.002")
+   - Instructions to retry with payment proof
+3. MAKE PAYMENT: Use mcp__locus__send_to_address with:
+   - address: [payment address from step 2]
+   - amount: [payment amount from step 2]
+   - memo: [descriptive memo about what you're paying for]
+4. EXTRACT PROOF: From the Locus payment response, extract:
+   - transaction_hash (or similar field) → use as payment_proof
+   - Use the same amount → payment_amount
+   - transaction signature (or hash) → payment_signature
+5. RETRY: Call the credit checking tool AGAIN, this time including:
+   - payment_proof: [transaction hash from step 4]
+   - payment_amount: [amount from step 2]
+   - payment_signature: [signature from step 4]
+6. SUCCESS: You should receive the actual data (credit score or payment history)
+
+IMPORTANT NOTES:
+- Always inform the user when you're making a payment on their behalf
+- Track total costs and report them to the user
+- If payment fails, explain the error clearly
+- The report_payment tool is FREE and doesn't require x402 payment
+
+EXAMPLE FLOW:
+User: "Check the credit score for 0xABC123"
+You: "I'll check the credit score for 0xABC123. This will cost $0.002."
+[Call get_credit_score without payment → receive 402]
+You: "Payment required. Sending $0.002 to the credit server..."
+[Call send_to_address → get transaction hash]
+[Call get_credit_score again with payment_proof → get credit score]
+You: "✅ Credit score retrieved! [show results] Total cost: $0.002"
+
+When users ask about credit checking, creditworthiness, payment history, or the credit server, use the credit checking tools to help them.`,
       // Auto-approve tool usage
       canUseTool: async (toolName: string, input: Record<string, unknown>) => {
         if (toolName.startsWith('mcp__locus__')) {
@@ -47,7 +95,7 @@ async function main(): Promise<void> {
             updatedInput: input
           };
         }
-        if (['get_credit_score', 'get_payment_history', 'report_payment', 'check_credit_server'].includes(toolName)) {
+        if (toolName.startsWith('mcp__credit-checking__')) {
           console.log(`\n🏦 Agent using credit checking tool: ${toolName}`);
           return {
             behavior: 'allow' as const,
@@ -58,38 +106,23 @@ async function main(): Promise<void> {
           behavior: 'deny' as const,
           message: 'Only Locus and credit checking tools are allowed'
         };
-      },
-      // Execute custom credit checking tools
-      executeTool: async (toolName: string, input: Record<string, unknown>) => {
-        if (['get_credit_score', 'get_payment_history', 'report_payment', 'check_credit_server'].includes(toolName)) {
-          try {
-            const result = await executeCreditTool(toolName, input);
-            return {
-              success: true,
-              result
-            };
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            return {
-              success: false,
-              error: errorMessage
-            };
-          }
-        }
-        // For MCP tools, return undefined to let SDK handle them
-        return undefined;
       }
     };
 
-    console.log('✓ MCP configured');
-    console.log('✓ Credit checking tools loaded\n');
+    console.log('✓ Locus MCP configured');
+    console.log('✓ Credit checking MCP server configured\n');
 
     // 2. Test connection with initial query
     console.log('Testing Locus MCP connection...');
     let mcpConnected = false;
 
+    // Test query to verify tools are available
+    const testPrompt = DEBUG_MODE
+      ? 'List all tools you have access to, including credit checking tools.'
+      : 'Say "ready" if you can see the Locus tools.';
+
     for await (const message of query({
-      prompt: 'Say "ready" if you can see the Locus tools.',
+      prompt: testPrompt,
       options
     })) {
       if (message.type === 'system' && message.subtype === 'init') {

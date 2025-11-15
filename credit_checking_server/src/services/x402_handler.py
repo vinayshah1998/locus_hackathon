@@ -84,7 +84,12 @@ class X402Handler:
             True if payment is valid, False otherwise
         """
         if not self.enabled:
-            logger.warning("x402_disabled", message="Payment verification disabled")
+            logger.debug(
+                "x402_debug_mode_bypass",
+                message="Payment verification disabled - allowing access",
+                endpoint=request.url.path,
+                required_amount=str(required_amount)
+            )
             return True
 
         # Extract x402 headers

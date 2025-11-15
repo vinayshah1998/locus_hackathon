@@ -55,6 +55,23 @@ async def lifespan(app: FastAPI):
         port=settings.server_port
     )
 
+    # Log x402 payment status prominently
+    if not settings.x402_enabled:
+        logger.warning(
+            "x402_debug_mode_enabled",
+            message="⚠️  X402 PAYMENT VERIFICATION DISABLED - DEBUG MODE ACTIVE ⚠️",
+            x402_enabled=False,
+            note="All paid endpoints will be accessible without payment"
+        )
+    else:
+        logger.info(
+            "x402_payment_verification_enabled",
+            x402_enabled=True,
+            wallet_address=settings.locus_wallet_address,
+            credit_score_price=str(settings.credit_score_price),
+            payment_history_price=str(settings.payment_history_price)
+        )
+
     try:
         # Connect to MongoDB
         await Database.connect()
@@ -211,9 +228,11 @@ async def root():
             "report_payment": "/report-payment"
         },
         "protocol": "x402",
+        "x402_enabled": settings.x402_enabled,
+        "debug_mode": not settings.x402_enabled,
         "pricing": {
-            "credit_score": f"${settings.credit_score_price} USD",
-            "payment_history": f"${settings.payment_history_price} USD",
+            "credit_score": f"${settings.credit_score_price} USD" if settings.x402_enabled else "FREE (debug mode)",
+            "payment_history": f"${settings.payment_history_price} USD" if settings.x402_enabled else "FREE (debug mode)",
             "report_payment": "Free"
         }
     }
