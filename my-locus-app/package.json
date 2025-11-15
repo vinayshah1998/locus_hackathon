@@ -8,7 +8,10 @@
     "start": "tsx index.ts",
     "dev": "tsx watch index.ts",
     "build": "tsc",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "a2a": "tsx src/main.ts",
+    "a2a:alice": "AGENT_PORT=4000 AGENT_NAME=Alice AGENT_WALLET_ADDRESS=0xALICE_WALLET AGENT_PERSONALITY=balanced tsx src/main.ts",
+    "a2a:bob": "AGENT_PORT=4001 AGENT_NAME=Bob AGENT_WALLET_ADDRESS=0xBOB_WALLET AGENT_PERSONALITY=conservative tsx src/main.ts"
   },
   "keywords": [
     "locus",
@@ -22,10 +25,16 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.42",
-    "dotenv": "^16.4.5"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
     "@types/node": "^22.10.2",
+    "@types/uuid": "^10.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

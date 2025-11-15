@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A2A Payment Agent</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      background: #2c3e50;
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    header h1 {
+      margin-bottom: 5px;
+    }
+
+    .agent-info {
+      display: flex;
+      gap: 20px;
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .card h2 {
+      margin-bottom: 15px;
+      color: #2c3e50;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+
+    .task {
+      background: #ecf0f1;
+      border-radius: 6px;
+      padding: 15px;
+      margin-bottom: 10px;
+    }
+
+    .task.input-required {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+    }
+
+    .task.completed {
+      background: #d4edda;
+      border-left: 4px solid #28a745;
+    }
+
+    .task.working {
+      background: #cce5ff;
+      border-left: 4px solid #007bff;
+    }
+
+    .task-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .task-id {
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .task-status {
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      background: #333;
+      color: white;
+    }
+
+    .task-status.input-required {
+      background: #ffc107;
+      color: #333;
+    }
+
+    .task-status.completed {
+      background: #28a745;
+    }
+
+    .task-status.working {
+      background: #007bff;
+    }
+
+    .task-details {
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+
+    .task-details p {
+      margin: 5px 0;
+    }
+
+    .decision-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: transform 0.1s;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    .btn-approve {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-reject {
+      background: #dc3545;
+      color: white;
+    }
+
+    .btn-counter {
+      background: #ffc107;
+      color: #333;
+    }
+
+    .btn-refresh {
+      background: #3498db;
+      color: white;
+    }
+
+    .no-tasks {
+      color: #666;
+      font-style: italic;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .credit-score {
+      font-size: 24px;
+      font-weight: bold;
+      color: #2c3e50;
+    }
+
+    .credit-score.high {
+      color: #28a745;
+    }
+
+    .credit-score.medium {
+      color: #ffc107;
+    }
+
+    .credit-score.low {
+      color: #dc3545;
+    }
+
+    .recommendation {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 5px;
+      font-weight: bold;
+    }
+
+    .recommendation.accept {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .recommendation.reject {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .recommendation.counter_offer {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .error {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .working .task-status {
+      animation: pulse 2s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>A2A Payment Agent</h1>
+      <div class="agent-info">
+        <span id="agent-name">Loading...</span>
+        <span id="agent-url"></span>
+      </div>
+    </header>
+
+    <div id="error-container"></div>
+
+    <div class="card">
+      <h2>Pending Decisions <button class="btn-refresh" onclick="refreshTasks()">Refresh</button></h2>
+      <div id="pending-tasks">
+        <div class="loading">Loading tasks...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>All Tasks</h2>
+      <div id="all-tasks">
+        <div class="loading">Loading tasks...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Auto-refresh interval (ms)
+    const REFRESH_INTERVAL = 5000;
+
+    async function fetchAgentCard() {
+      try {
+        const response = await fetch('/.well-known/agent-card.json');
+        const card = await response.json();
+        document.getElementById('agent-name').textContent = card.name;
+        document.getElementById('agent-url').textContent = card.url;
+      } catch (error) {
+        console.error('Failed to fetch agent card:', error);
+      }
+    }
+
+    async function refreshTasks() {
+      await Promise.all([fetchPendingTasks(), fetchAllTasks()]);
+    }
+
+    async function fetchPendingTasks() {
+      const container = document.getElementById('pending-tasks');
+
+      try {
+        const response = await fetch('/tasks/pending-input');
+        const data = await response.json();
+
+        if (data.tasks.length === 0) {
+          container.innerHTML = '<div class="no-tasks">No tasks requiring input</div>';
+          return;
+        }
+
+        container.innerHTML = data.tasks.map(task => renderPendingTask(task)).join('');
+      } catch (error) {
+        console.error('Failed to fetch pending tasks:', error);
+        container.innerHTML = '<div class="error">Failed to load tasks</div>';
+      }
+    }
+
+    async function fetchAllTasks() {
+      const container = document.getElementById('all-tasks');
+
+      try {
+        // We'll need to fetch all tasks - for now just show pending
+        // In a full implementation, we'd have an endpoint for all tasks
+        const response = await fetch('/tasks/pending-input');
+        const data = await response.json();
+
+        if (data.tasks.length === 0) {
+          container.innerHTML = '<div class="no-tasks">No active tasks</div>';
+          return;
+        }
+
+        container.innerHTML = data.tasks.map(task => renderTask(task)).join('');
+      } catch (error) {
+        console.error('Failed to fetch tasks:', error);
+        container.innerHTML = '<div class="error">Failed to load tasks</div>';
+      }
+    }
+
+    function renderPendingTask(task) {
+      const metadata = task.metadata || {};
+      const request = metadata.paymentRequest || {};
+      const creditScore = metadata.creditScore || 70;
+      const isNewAgent = metadata.isNewAgent || false;
+
+      let scoreClass = 'medium';
+      if (creditScore >= 80) scoreClass = 'high';
+      else if (creditScore < 60) scoreClass = 'low';
+
+      const evaluation = evaluateRequest(creditScore, request.proposed_delay_days);
+
+      return `
+        <div class="task input-required">
+          <div class="task-header">
+            <span class="task-id">${task.id}</span>
+            <span class="task-status input-required">Input Required</span>
+          </div>
+
+          <div class="task-details">
+            <p><strong>From:</strong> ${request.from_agent || 'Unknown'}</p>
+            <p><strong>Amount:</strong> $${request.amount || 0} ${request.currency || 'USD'}</p>
+            <p><strong>Requested Delay:</strong> ${request.proposed_delay_days || 0} days</p>
+            <p><strong>Credit Score:</strong>
+              <span class="credit-score ${scoreClass}">${creditScore}</span>
+              ${isNewAgent ? ' (New Agent)' : ''}
+            </p>
+          </div>
+
+          <div class="recommendation ${evaluation.recommendation}">
+            Recommendation: ${evaluation.recommendation.replace('_', ' ').toUpperCase()}
+            <br>
+            <small>${evaluation.reason}</small>
+          </div>
+
+          <div class="decision-buttons">
+            <button class="btn-approve" onclick="makeDecision('${task.id}', 'approve')">
+              Accept Payment
+            </button>
+            <button class="btn-reject" onclick="makeDecision('${task.id}', 'reject')">
+              Reject (Demand Immediate)
+            </button>
+            <button class="btn-counter" onclick="makeCounterOffer('${task.id}')">
+              Counter Offer
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTask(task) {
+      const state = task.status.state;
+      let stateClass = state.replace('-', '');
+
+      return `
+        <div class="task ${state}">
+          <div class="task-header">
+            <span class="task-id">${task.id}</span>
+            <span class="task-status ${stateClass}">${state}</span>
+          </div>
+          <div class="task-details">
+            <p><strong>Last Updated:</strong> ${new Date(task.status.timestamp).toLocaleString()}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function evaluateRequest(creditScore, delayDays) {
+      // Simple client-side evaluation (mirrors server logic)
+      if (creditScore < 70) {
+        return {
+          recommendation: 'reject',
+          reason: `Credit score ${creditScore} is below minimum threshold`
+        };
+      }
+
+      if (delayDays > 30) {
+        return {
+          recommendation: 'counter_offer',
+          reason: `Requested delay of ${delayDays} days is too long`
+        };
+      }
+
+      if (creditScore >= 80) {
+        return {
+          recommendation: 'accept',
+          reason: `Credit score ${creditScore} indicates reliable payment history`
+        };
+      }
+
+      return {
+        recommendation: 'accept',
+        reason: `Credit score ${creditScore} is acceptable for ${delayDays} day delay`
+      };
+    }
+
+    async function makeDecision(taskId, decision, message = '') {
+      try {
+        const response = await fetch(`/tasks/${taskId}/input`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision, message })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to submit decision');
+        }
+
+        const result = await response.json();
+        console.log('Decision result:', result);
+
+        // Refresh the task list
+        await refreshTasks();
+      } catch (error) {
+        console.error('Error making decision:', error);
+        showError('Failed to submit decision: ' + error.message);
+      }
+    }
+
+    function makeCounterOffer(taskId) {
+      const days = prompt('Enter counter-offer delay (days):', '14');
+      if (days !== null) {
+        makeDecision(taskId, 'counter', `${days} days`);
+      }
+    }
+
+    function showError(message) {
+      const container = document.getElementById('error-container');
+      container.innerHTML = `<div class="error">${message}</div>`;
+      setTimeout(() => {
+        container.innerHTML = '';
+      }, 5000);
+    }
+
+    // Initialize
+    fetchAgentCard();
+    refreshTasks();
+
+    // Auto-refresh
+    setInterval(refreshTasks, REFRESH_INTERVAL);
+  </script>
+</body>
+</html>

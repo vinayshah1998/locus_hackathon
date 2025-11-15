@@ -176,16 +176,16 @@ export async function getCreditScore(agent_wallet: string): Promise<CreditScoreR
   if (response.status === 402) {
     // Payment required - for now we'll throw an error
     // In production, this should trigger the x402 payment flow
-    const paymentInfo = await response.json();
+    const paymentInfo = await response.json() as { payment_details?: { amount?: string } };
     throw new Error(`Payment required: $${paymentInfo.payment_details?.amount || '0.002'} USD. X402 payment flow not yet implemented.`);
   }
 
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json() as { message?: string };
     throw new Error(`Failed to get credit score: ${error.message || response.statusText}`);
   }
 
-  return await response.json();
+  return await response.json() as CreditScoreResponse;
 }
 
 export async function getPaymentHistory(
@@ -210,16 +210,16 @@ export async function getPaymentHistory(
   const response = await fetch(url, { headers });
 
   if (response.status === 402) {
-    const paymentInfo = await response.json();
+    const paymentInfo = await response.json() as { payment_details?: { amount?: string } };
     throw new Error(`Payment required: $${paymentInfo.payment_details?.amount || '0.001'} USD. X402 payment flow not yet implemented.`);
   }
 
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json() as { message?: string };
     throw new Error(`Failed to get payment history: ${error.message || response.statusText}`);
   }
 
-  return await response.json();
+  return await response.json() as PaymentHistoryResponse;
 }
 
 export async function reportPayment(paymentData: {
@@ -250,11 +250,11 @@ export async function reportPayment(paymentData: {
   });
 
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json() as { message?: string };
     throw new Error(`Failed to report payment: ${error.message || response.statusText}`);
   }
 
-  return await response.json();
+  return await response.json() as ReportPaymentResponse;
 }
 
 export async function checkCreditServer(): Promise<{ status: string; timestamp: string; version: string }> {
@@ -266,27 +266,35 @@ export async function checkCreditServer(): Promise<{ status: string; timestamp: 
     throw new Error(`Credit server health check failed: ${response.statusText}`);
   }
 
-  return await response.json();
+  return await response.json() as { status: string; timestamp: string; version: string };
 }
 
 /**
  * Tool executor - maps tool names to execution functions
  */
-export async function executeCreditTool(toolName: string, input: Record<string, any>): Promise<any> {
+export async function executeCreditTool(toolName: string, input: Record<string, unknown>): Promise<unknown> {
   switch (toolName) {
     case 'get_credit_score':
-      return await getCreditScore(input.agent_wallet);
+      return await getCreditScore(input.agent_wallet as string);
 
     case 'get_payment_history':
       return await getPaymentHistory(
-        input.agent_wallet,
-        input.role || 'all',
-        input.page || 1,
-        input.page_size || 50
+        input.agent_wallet as string,
+        (input.role as string) || 'all',
+        (input.page as number) || 1,
+        (input.page_size as number) || 50
       );
 
     case 'report_payment':
-      return await reportPayment(input);
+      return await reportPayment(input as {
+        payer_wallet: string;
+        payee_wallet: string;
+        amount: string;
+        currency?: string;
+        due_date: string;
+        payment_date?: string;
+        status: 'on_time' | 'late' | 'defaulted';
+      });
 
     case 'check_credit_server':
       return await checkCreditServer();
