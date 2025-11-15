@@ -6,8 +6,8 @@ This guide shows you how to test your Credit Checking Server API.
 
 1. **Start the server**:
    ```bash
-   cd credit_checking_server/src
-   uvicorn main:app --reload
+   cd credit_checking_server
+   uvicorn src.main:app --reload
    ```
 
 2. **Configure .env for testing**:
@@ -476,8 +476,8 @@ Final score is clamped to [0-100].
 curl http://localhost:8000/health
 
 # Check server logs
-cd credit_checking_server/src
-uvicorn main:app --reload
+cd credit_checking_server
+uvicorn src.main:app --reload
 ```
 
 ### MongoDB connection issues

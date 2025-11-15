@@ -134,8 +134,8 @@ Follow this order:
 ### 4. Run the Server
 
 ```bash
-cd src
-uvicorn main:app --host localhost --port 8000 --reload
+# Run from the credit_checking_server directory (not from inside src)
+uvicorn src.main:app --host localhost --port 8000 --reload
 ```
 
 Visit:

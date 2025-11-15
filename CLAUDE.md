@@ -243,8 +243,8 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # Edit with your config
-cd src
-uvicorn main:app --reload
+# Run from credit_checking_server directory (not from src)
+uvicorn src.main:app --reload
 ```
 
 **Configuration**:

@@ -64,9 +64,10 @@ docker run -d -p 27017:27017 --name mongodb mongo:latest
 
 6. Run the server:
 ```bash
-cd src
-uvicorn main:app --host localhost --port 8000 --reload
+uvicorn src.main:app --host localhost --port 8000 --reload
 ```
+
+**Note**: Run this command from the `credit_checking_server` directory (not from inside `src`).
 
 The server will be available at `http://localhost:8000`
 
