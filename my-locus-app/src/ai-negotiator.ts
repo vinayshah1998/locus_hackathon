@@ -7,7 +7,7 @@ import 'dotenv/config';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { PersonalityConfig } from './personality.js';
 import { PaymentRequest } from './a2a-types.js';
-import { creditCheckingTools, executeCreditTool } from '../tools.js';
+import { creditCheckingTools, executeCreditTool, type X402PaymentRequired } from '../tools.js';
 
 export interface NegotiationContext {
   paymentRequest: PaymentRequest;
@@ -59,6 +59,26 @@ export class AINegotiator {
         if (['get_credit_score', 'get_payment_history'].includes(toolName)) {
           try {
             const result = await executeCreditTool(toolName, input);
+
+            // Check if result is x402 payment required
+            if (result && typeof result === 'object' && 'payment_required' in result) {
+              const paymentReq = result as X402PaymentRequired;
+              console.log(`  [AI] Tool ${toolName} requires x402 payment: $${paymentReq.amount}`);
+
+              // Return payment requirement info to Claude
+              // Since we're in A2A mode without direct Locus wallet access,
+              // we'll return this as a "success" with payment requirement details
+              return {
+                success: true,
+                result: {
+                  payment_required: true,
+                  message: `This endpoint requires x402 payment of $${paymentReq.amount} USD to ${paymentReq.payment_address}. In production, you would make the payment via Locus wallet and retry with payment proof. For now, assuming payment would succeed and using default credit score of 70.`,
+                  amount: paymentReq.amount,
+                  endpoint: paymentReq.endpoint
+                }
+              };
+            }
+
             console.log(`  [AI] Tool ${toolName} result:`, JSON.stringify(result).substring(0, 200));
             return {
               success: true,

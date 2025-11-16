@@ -148,7 +148,7 @@ async def get_credit_score(
     )
 
     # Validate agent_id format
-    if not agent_id.startswith("0x") or len(agent_id) != 42:
+    if not agent_id.startswith("0x"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
