@@ -11,8 +11,9 @@ import { createAgentCard } from './agent-card.js';
 import { A2AServer } from './a2a-server.js';
 import { TaskStore } from './task-store.js';
 import { PaymentNegotiationExecutor } from './payment-executor.js';
-import { getPersonality, PERSONALITIES } from './personality.js';
-import { A2AClient, AgentRegistry } from './agent-client.js';
+import { getPersonality } from './personality.js';
+import { AgentRegistry } from './agent-client.js';
+import { ConversationalAgent } from './conversational-agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -109,17 +110,31 @@ async function main(): Promise<void> {
     console.log();
 
     console.log('─'.repeat(60));
+    console.log('Natural Language Interface:');
+    console.log('  Just type naturally! Examples:');
+    console.log('  "Ask bob to pay me $50 for dinner"');
+    console.log('  "Request $100 from alice, she can pay in 14 days"');
+    console.log('  "Tell bob I need the $200 he owes me today"');
+    console.log('');
     console.log('CLI Commands:');
-    console.log('  pay <name|wallet> <amount> [days] - Send payment request');
-    console.log('  tasks                    - List active tasks');
-    console.log('  pending                  - Show tasks needing input');
+    console.log('  tasks      - List active tasks');
+    console.log('  pending    - Show tasks needing input');
     console.log('  decide <taskId> <decision> - Respond to pending task');
-    console.log('  agents                   - List known agents');
-    console.log('  personality              - Show current personality');
-    console.log('  help                     - Show this help');
-    console.log('  exit                     - Shutdown agent');
+    console.log('  agents     - List known agents');
+    console.log('  personality - Show current personality');
+    console.log('  help       - Show this help');
+    console.log('  exit       - Shutdown agent');
     console.log('─'.repeat(60));
     console.log();
+  });
+
+  // Initialize conversational agent
+  const conversationalAgent = new ConversationalAgent({
+    agentName: AGENT_NAME,
+    agentWallet: AGENT_WALLET,
+    personality,
+    knownAgents: KNOWN_AGENTS,
+    agentRegistry
   });
 
   // CLI Interface
@@ -142,19 +157,6 @@ async function main(): Promise<void> {
 
     try {
       switch (command) {
-        case 'register':
-          if (args.length < 3) {
-            console.log('Usage: register <wallet_address> <agent_url>');
-          } else {
-            agentRegistry.registerAgent(args[1], args[2]);
-            console.log(`✓ Registered agent ${args[1]} at ${args[2]}`);
-          }
-          break;
-
-        case 'pay':
-          await handlePayCommand(args);
-          break;
-
         case 'tasks':
           listTasks(taskStore);
           break;
@@ -192,7 +194,10 @@ async function main(): Promise<void> {
           process.exit(0);
 
         default:
-          console.log(`Unknown command: ${command}. Type 'help' for available commands.`);
+          // Treat as natural language input
+          console.log('\n🤖 Processing your request...\n');
+          const response = await conversationalAgent.processUserInput(line.trim());
+          console.log(response);
       }
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : error);
@@ -205,78 +210,6 @@ async function main(): Promise<void> {
     console.log('Agent shutdown');
     process.exit(0);
   });
-
-  async function handlePayCommand(args: string[]): Promise<void> {
-    if (args.length < 3) {
-      console.log('Usage: pay <name|wallet> <amount> [delay_days]');
-      console.log('Examples:');
-      console.log('  pay bob 500 30      - Pay Bob $500, request 30 day delay');
-      console.log('  pay alice 100       - Pay Alice $100 with default delay');
-      return;
-    }
-
-    let toWallet = args[1];
-    const amount = parseFloat(args[2]);
-    const delayDays = args[3] ? parseInt(args[3], 10) : personality.preferredDelayDays;
-
-    // Resolve agent name to wallet address
-    const agentName = toWallet.toLowerCase();
-    if (KNOWN_AGENTS[agentName]) {
-      toWallet = KNOWN_AGENTS[agentName].wallet;
-      console.log(`Resolved ${args[1]} to ${toWallet}`);
-    }
-
-    const client = await agentRegistry.getClient(toWallet, AGENT_WALLET, AGENT_API_KEY);
-    if (!client) {
-      console.log(`Agent not found: ${args[1]}`);
-      console.log('Known agents:');
-      for (const [name, info] of Object.entries(KNOWN_AGENTS)) {
-        console.log(`  - ${name}: ${info.wallet}`);
-      }
-      return;
-    }
-
-    console.log(`Sending payment request to ${args[1]} (${toWallet})...`);
-    console.log(`  Amount: $${amount} USD`);
-    console.log(`  Requested delay: ${delayDays} days`);
-    console.log('  Waiting for response...\n');
-
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + delayDays);
-
-    const result = await client.sendPaymentRequest(
-      toWallet,
-      amount,
-      'USD',
-      dueDate.toISOString(),
-      delayDays,
-      'Payment negotiation request'
-    );
-
-    console.log(`\n✓ Response received:`);
-    console.log(`  Task ID: ${result.taskId}`);
-    console.log(`  Status: ${result.status.state}`);
-
-    if (result.status.message) {
-      const textParts = result.status.message.parts.filter((p) => p.kind === 'text');
-      if (textParts.length > 0) {
-        console.log(`  Message: ${(textParts[0] as unknown as { text: string }).text}`);
-      }
-
-      const dataParts = result.status.message.parts.filter((p) => p.kind === 'data');
-      if (dataParts.length > 0) {
-        const data = (dataParts[0] as unknown as { data: Record<string, unknown> }).data;
-        if (data.type === 'payment_response') {
-          console.log(`  Decision: ${data.decision}`);
-          if (data.reason) console.log(`  Reason: ${data.reason}`);
-          if (data.counter_offer) {
-            const counter = data.counter_offer as { delay_days?: number };
-            console.log(`  Counter-offer: ${counter.delay_days} days`);
-          }
-        }
-      }
-    }
-  }
 
   function listTasks(store: TaskStore): void {
     const tasks = store.getAllTasks();
@@ -393,10 +326,12 @@ async function main(): Promise<void> {
   }
 
   function showHelp(): void {
-    console.log('Available Commands:');
-    console.log('  pay <name|wallet> <amount> [days] - Send payment request');
-    console.log('    Examples: pay bob 500 30');
-    console.log('              pay alice 100');
+    console.log('Natural Language Examples:');
+    console.log('  "Ask bob to pay me $50 for dinner"');
+    console.log('  "Request $100 from alice, she can pay in 14 days"');
+    console.log('  "Tell bob I need the $200 he owes me today"');
+    console.log('');
+    console.log('CLI Commands:');
     console.log('  tasks                        - List all active tasks');
     console.log('  pending                      - Show tasks needing user input');
     console.log('  decide <id> <decision> [msg] - Respond to pending task');

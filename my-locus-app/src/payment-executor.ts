@@ -13,8 +13,8 @@ import {
 } from './a2a-types.js';
 import { TaskStore } from './task-store.js';
 import { AgentExecutor } from './a2a-server.js';
-import { PersonalityConfig, evaluatePaymentDecision } from './personality.js';
-import { getCreditScore } from '../tools.js';
+import { PersonalityConfig } from './personality.js';
+import { AINegotiator, AIDecision } from './ai-negotiator.js';
 
 export interface ExecutorConfig {
   personality: PersonalityConfig;
@@ -82,59 +82,125 @@ export class PaymentNegotiationExecutor implements AgentExecutor {
       return this.createAcceptedResponse(taskId, contextId, request, taskStore);
     }
 
-    // Check credit score of the requester
-    let creditScore = 70; // Default
-    let isNewAgent = false;
+    // Use AI Negotiator for intelligent decision-making
+    console.log('[Executor] Invoking Claude AI for negotiation decision...');
+    const aiNegotiator = new AINegotiator();
+    const aiDecision = await aiNegotiator.evaluatePaymentRequest({
+      paymentRequest: request,
+      personality: this.config.personality,
+      agentWallet: this.config.walletAddress,
+      agentName: this.config.agentName
+    });
 
-    try {
-      console.log(`[Executor] Checking credit score for ${request.from_agent}...`);
-      const creditResult = await getCreditScore(request.from_agent);
-      creditScore = creditResult.credit_score;
-      isNewAgent = creditResult.is_new_agent;
-      console.log(`[Executor] Credit score: ${creditScore} (new agent: ${isNewAgent})`);
-    } catch (error) {
-      console.warn('[Executor] Failed to get credit score, using default:', error);
-    }
+    // Store AI decision for transparency
+    taskStore.setMetadata(taskId, 'aiDecision', aiDecision);
 
-    taskStore.setMetadata(taskId, 'creditScore', creditScore);
-    taskStore.setMetadata(taskId, 'isNewAgent', isNewAgent);
+    console.log(`[Executor] AI Decision: ${aiDecision.decision} (confidence: ${aiDecision.confidence})`);
+    console.log(`[Executor] AI Reason: ${aiDecision.reason.substring(0, 200)}...`);
 
-    // Evaluate based on personality
-    const evaluation = evaluatePaymentDecision(
-      this.config.personality,
-      creditScore,
-      request.proposed_delay_days,
-      request.amount
-    );
-
-    console.log(`[Executor] Decision evaluation:`, evaluation);
-
-    // If user approval required, transition to input-required
-    if (evaluation.requiresUserApproval) {
-      return this.createInputRequiredStatus(
+    // Check if we need user approval based on autonomy level
+    if (this.shouldAskUser(aiDecision)) {
+      console.log('[Executor] User approval required based on autonomy level');
+      return this.createInputRequiredStatusFromAI(
         taskId,
         contextId,
         request,
-        creditScore,
-        isNewAgent,
-        evaluation
+        aiDecision
       );
     }
 
-    // Auto-decide based on evaluation
-    if (evaluation.recommendation === 'accept') {
-      return this.createAcceptedResponse(taskId, contextId, request, taskStore);
-    } else if (evaluation.recommendation === 'counter_offer' && evaluation.counterOffer) {
-      return this.createCounterOfferResponse(
-        taskId,
-        contextId,
-        request,
-        evaluation.counterOffer.delayDays,
-        taskStore
-      );
-    } else {
-      return this.createRejectedResponse(taskId, contextId, request, evaluation.reason, taskStore);
+    // Execute the AI's decision autonomously
+    switch (aiDecision.decision) {
+      case 'accept':
+        return this.createAcceptedResponse(taskId, contextId, request, taskStore);
+
+      case 'counter_offer':
+        const counterDays = aiDecision.counterOfferDays || this.config.personality.maxAcceptableDelayDays;
+        return this.createCounterOfferResponse(taskId, contextId, request, counterDays, taskStore);
+
+      case 'reject':
+        return this.createRejectedResponse(taskId, contextId, request, aiDecision.reason, taskStore);
+
+      case 'ask_user':
+      default:
+        return this.createInputRequiredStatusFromAI(taskId, contextId, request, aiDecision);
     }
+  }
+
+  private shouldAskUser(aiDecision: AIDecision): boolean {
+    const autonomy = this.config.personality.autonomyLevel;
+
+    // Full autonomy - AI decides everything
+    if (autonomy === 'full') {
+      return aiDecision.decision === 'ask_user';
+    }
+
+    // Conservative autonomy - always ask user
+    if (autonomy === 'conservative') {
+      return true;
+    }
+
+    // Semi autonomy - ask user for low confidence or explicit ask_user
+    if (autonomy === 'semi') {
+      if (aiDecision.decision === 'ask_user') return true;
+      if (aiDecision.confidence === 'low') return true;
+      return false;
+    }
+
+    return false;
+  }
+
+  private createInputRequiredStatusFromAI(
+    taskId: string,
+    contextId: string,
+    request: PaymentRequest,
+    aiDecision: AIDecision
+  ): TaskStatus {
+    const promptText = [
+      `Payment Request Received`,
+      ``,
+      `From: ${request.from_agent}`,
+      `Amount: $${request.amount} ${request.currency}`,
+      `Requested delay: ${request.proposed_delay_days} days`,
+      ``,
+      `AI Analysis:`,
+      `- Recommendation: ${aiDecision.decision.toUpperCase()}`,
+      `- Confidence: ${aiDecision.confidence.toUpperCase()}`,
+      `- Reasoning: ${aiDecision.reason}`,
+      `- Tools Used: ${aiDecision.toolsUsed.join(', ') || 'None'}`,
+      aiDecision.counterOfferDays ? `- Suggested Counter-Offer: ${aiDecision.counterOfferDays} days` : '',
+      ``,
+      `What would you like to do?`,
+      `- approve: Accept the delayed payment`,
+      `- reject: Reject and demand immediate payment`,
+      `- counter: Make a counter-offer`
+    ].filter(Boolean).join('\n');
+
+    const message: Message = {
+      kind: 'message',
+      messageId: uuidv4(),
+      role: 'agent',
+      taskId,
+      contextId,
+      parts: [
+        { kind: 'text', text: promptText },
+        {
+          kind: 'data',
+          data: {
+            type: 'input_request',
+            request,
+            aiDecision
+          } as unknown as Record<string, unknown>
+        }
+      ],
+      timestamp: new Date().toISOString()
+    };
+
+    return {
+      state: 'input-required',
+      message,
+      timestamp: new Date().toISOString()
+    };
   }
 
   private async handleUserDecision(
@@ -214,61 +280,6 @@ export class PaymentNegotiationExecutor implements AgentExecutor {
     return {
       state: 'completed',
       message: responseMessage,
-      timestamp: new Date().toISOString()
-    };
-  }
-
-  private createInputRequiredStatus(
-    taskId: string,
-    contextId: string,
-    request: PaymentRequest,
-    creditScore: number,
-    isNewAgent: boolean,
-    evaluation: ReturnType<typeof evaluatePaymentDecision>
-  ): TaskStatus {
-    const promptText = [
-      `Payment Request Received`,
-      ``,
-      `From: ${request.from_agent}`,
-      `Amount: $${request.amount} ${request.currency}`,
-      `Requested delay: ${request.proposed_delay_days} days`,
-      ``,
-      `Credit Assessment:`,
-      `- Credit Score: ${creditScore}/100 ${isNewAgent ? '(New Agent)' : ''}`,
-      `- Recommendation: ${evaluation.recommendation.toUpperCase()}`,
-      `- Reason: ${evaluation.reason}`,
-      ``,
-      `What would you like to do?`,
-      `- approve: Accept the delayed payment`,
-      `- reject: Reject and demand immediate payment`,
-      `- counter: Make a counter-offer`
-    ].join('\n');
-
-    const message: Message = {
-      kind: 'message',
-      messageId: uuidv4(),
-      role: 'agent',
-      taskId,
-      contextId,
-      parts: [
-        { kind: 'text', text: promptText },
-        {
-          kind: 'data',
-          data: {
-            type: 'input_request',
-            request,
-            creditScore,
-            isNewAgent,
-            evaluation
-          }
-        }
-      ],
-      timestamp: new Date().toISOString()
-    };
-
-    return {
-      state: 'input-required',
-      message,
       timestamp: new Date().toISOString()
     };
   }

@@ -9,7 +9,8 @@ import 'dotenv/config';
  * - Report payment events
  */
 
-const CREDIT_SERVER_URL = process.env.CREDIT_SERVER_URL || 'http://localhost:8000';
+// HARDCODED: Credit server IP address (changed from localhost:8000)
+const CREDIT_SERVER_URL = process.env.CREDIT_SERVER_URL || 'https://vinays-macbook-pro.tailc5996c.ts.net/';
 const AGENT_WALLET = process.env.AGENT_WALLET_ADDRESS || '0xDEFAULT_AGENT_WALLET';
 
 // Tool definitions that Claude Agent SDK can use
