@@ -8,6 +8,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { PersonalityConfig } from './personality.js';
 import { PaymentRequest } from './a2a-types.js';
 import { creditCheckingTools, executeCreditTool, type X402PaymentRequired } from '../tools.js';
+import { LocusPaymentService } from './locus-payment-service.js';
 
 export interface NegotiationContext {
   paymentRequest: PaymentRequest;
@@ -25,6 +26,12 @@ export interface AIDecision {
 }
 
 export class AINegotiator {
+  private locusPaymentService?: LocusPaymentService;
+
+  constructor(locusPaymentService?: LocusPaymentService) {
+    this.locusPaymentService = locusPaymentService;
+  }
+
   async evaluatePaymentRequest(context: NegotiationContext): Promise<AIDecision> {
     const { paymentRequest, personality, agentName } = context;
 
@@ -65,18 +72,52 @@ export class AINegotiator {
               const paymentReq = result as X402PaymentRequired;
               console.log(`  [AI] Tool ${toolName} requires x402 payment: $${paymentReq.amount}`);
 
-              // Return payment requirement info to Claude
-              // Since we're in A2A mode without direct Locus wallet access,
-              // we'll return this as a "success" with payment requirement details
-              return {
-                success: true,
-                result: {
-                  payment_required: true,
-                  message: `This endpoint requires x402 payment of $${paymentReq.amount} USD to ${paymentReq.payment_address}. In production, you would make the payment via Locus wallet and retry with payment proof. For now, assuming payment would succeed and using default credit score of 70.`,
+              // Try to make real payment if Locus service is available
+              if (this.locusPaymentService) {
+                console.log(`  [AI] Executing x402 payment of $${paymentReq.amount} to credit server...`);
+
+                const paymentResult = await this.locusPaymentService.sendPayment({
+                  toAddress: paymentReq.payment_address,
                   amount: paymentReq.amount,
-                  endpoint: paymentReq.endpoint
+                  memo: `x402 payment for ${paymentReq.endpoint}`
+                });
+
+                if (paymentResult.success && paymentResult.transactionHash) {
+                  console.log(`  [AI] ✅ x402 payment successful! TX: ${paymentResult.transactionHash}`);
+
+                  // Retry the tool call with payment proof
+                  const retryResult = await executeCreditTool(toolName, {
+                    ...input,
+                    payment_proof: paymentResult.transactionHash,
+                    payment_amount: paymentReq.amount,
+                    payment_signature: paymentResult.transactionHash
+                  });
+
+                  console.log(`  [AI] Tool ${toolName} result with payment:`, JSON.stringify(retryResult).substring(0, 200));
+                  return {
+                    success: true,
+                    result: retryResult
+                  };
+                } else {
+                  console.error(`  [AI] ❌ x402 payment failed: ${paymentResult.error}`);
+                  return {
+                    success: false,
+                    error: `X402 payment failed: ${paymentResult.error}. Using fallback default credit score.`
+                  };
                 }
-              };
+              } else {
+                // No Locus service - return fake data
+                console.warn(`  [AI] No Locus service configured - cannot make x402 payment`);
+                return {
+                  success: true,
+                  result: {
+                    payment_required: true,
+                    message: `This endpoint requires x402 payment of $${paymentReq.amount} USD. No payment service configured, assuming default credit score of 70.`,
+                    credit_score: 70,
+                    is_new_agent: true
+                  }
+                };
+              }
             }
 
             console.log(`  [AI] Tool ${toolName} result:`, JSON.stringify(result).substring(0, 200));

@@ -10,8 +10,8 @@
     "build": "tsc",
     "type-check": "tsc --noEmit",
     "a2a": "tsx src/main.ts",
-    "a2a:alice": "AGENT_PORT=4000 AGENT_NAME=Alice AGENT_WALLET_ADDRESS=0xALICE_WALLET AGENT_PERSONALITY=balanced tsx src/main.ts",
-    "a2a:bob": "AGENT_PORT=4001 AGENT_NAME=Bob AGENT_WALLET_ADDRESS=0xBOB_WALLET AGENT_PERSONALITY=conservative tsx src/main.ts"
+    "a2a:vinay": "AGENT_PORT=4000 AGENT_IDENTITY=vinay AGENT_PERSONALITY=balanced tsx src/main.ts",
+    "a2a:dhruv": "AGENT_PORT=4001 AGENT_IDENTITY=dhruv AGENT_PERSONALITY=conservative tsx src/main.ts"
   },
   "keywords": [
     "locus",

@@ -15,11 +15,14 @@ import { TaskStore } from './task-store.js';
 import { AgentExecutor } from './a2a-server.js';
 import { PersonalityConfig } from './personality.js';
 import { AINegotiator, AIDecision } from './ai-negotiator.js';
+import { LocusPaymentService } from './locus-payment-service.js';
+import { reportPayment } from '../tools.js';
 
 export interface ExecutorConfig {
   personality: PersonalityConfig;
   walletAddress: string;
   agentName: string;
+  locusPaymentService?: LocusPaymentService;
 }
 
 export class PaymentNegotiationExecutor implements AgentExecutor {
@@ -79,12 +82,12 @@ export class PaymentNegotiationExecutor implements AgentExecutor {
     // If no delay requested, auto-accept
     if (!request.proposed_delay_days || request.proposed_delay_days === 0) {
       console.log('[Executor] No delay requested, auto-accepting');
-      return this.createAcceptedResponse(taskId, contextId, request, taskStore);
+      return await this.createAcceptedResponse(taskId, contextId, request, taskStore);
     }
 
     // Use AI Negotiator for intelligent decision-making
     console.log('[Executor] Invoking Claude AI for negotiation decision...');
-    const aiNegotiator = new AINegotiator();
+    const aiNegotiator = new AINegotiator(this.config.locusPaymentService);
     const aiDecision = await aiNegotiator.evaluatePaymentRequest({
       paymentRequest: request,
       personality: this.config.personality,
@@ -112,7 +115,7 @@ export class PaymentNegotiationExecutor implements AgentExecutor {
     // Execute the AI's decision autonomously
     switch (aiDecision.decision) {
       case 'accept':
-        return this.createAcceptedResponse(taskId, contextId, request, taskStore);
+        return await this.createAcceptedResponse(taskId, contextId, request, taskStore);
 
       case 'counter_offer':
         const counterDays = aiDecision.counterOfferDays || this.config.personality.maxAcceptableDelayDays;
@@ -219,7 +222,7 @@ export class PaymentNegotiationExecutor implements AgentExecutor {
     switch (decision.decision) {
       case 'approve':
       case 'accept':
-        return this.createAcceptedResponse(taskId, contextId, request, taskStore);
+        return await this.createAcceptedResponse(taskId, contextId, request, taskStore);
 
       case 'reject':
         return this.createRejectedResponse(
@@ -284,20 +287,89 @@ export class PaymentNegotiationExecutor implements AgentExecutor {
     };
   }
 
-  private createAcceptedResponse(
+  private async createAcceptedResponse(
     taskId: string,
     contextId: string,
     request: PaymentRequest,
     taskStore: TaskStore
-  ): TaskStatus {
+  ): Promise<TaskStatus> {
+    console.log(`[Executor] Accepted payment request - executing real transfer...`);
+
+    let transactionHash: string | undefined;
+    let paymentError: string | undefined;
+
+    // Execute real payment if Locus service is configured
+    if (this.config.locusPaymentService) {
+      try {
+        // Determine if this is immediate or delayed payment
+        const isImmediate = !request.proposed_delay_days || request.proposed_delay_days === 0;
+
+        if (isImmediate) {
+          console.log(`[Executor] Executing immediate payment of $${request.amount} to ${request.to_agent}`);
+
+          // Execute the payment
+          const paymentResult = await this.config.locusPaymentService.sendPayment({
+            toAddress: request.to_agent, // Assuming to_agent is the wallet address
+            amount: String(request.amount),
+            memo: `Payment for: ${request.reason || 'A2A payment'}`
+          });
+
+          if (paymentResult.success) {
+            transactionHash = paymentResult.transactionHash;
+            console.log(`[Executor] ✅ Payment successful! TX: ${transactionHash}`);
+
+            // Report payment to credit server (non-blocking)
+            try {
+              const now = new Date().toISOString();
+              await reportPayment({
+                payer_wallet: this.config.walletAddress,
+                payee_wallet: request.from_agent, // The requester is the payee
+                amount: String(request.amount),
+                currency: request.currency || 'USD',
+                due_date: request.due_date,
+                payment_date: now,
+                status: 'on_time'
+              });
+              console.log(`[Executor] ✅ Payment reported to credit server`);
+            } catch (reportError) {
+              const errorMsg = reportError instanceof Error ? reportError.message : String(reportError);
+              console.warn(`[Executor] ⚠️  Could not report payment to credit server: ${errorMsg}`);
+              console.warn(`[Executor] Credit server may be offline at ${process.env.CREDIT_SERVER_URL || 'http://localhost:8000'}`);
+              console.warn(`[Executor] Payment still succeeded, but credit history not updated`);
+            }
+          } else {
+            paymentError = paymentResult.error;
+            console.error(`[Executor] ❌ Payment failed: ${paymentError}`);
+          }
+        } else {
+          console.log(`[Executor] Accepted delayed payment (${request.proposed_delay_days} days) - will execute later`);
+          // For delayed payments, we accept but don't execute now
+          // In production, you'd schedule this for later execution
+        }
+      } catch (error) {
+        paymentError = error instanceof Error ? error.message : String(error);
+        console.error(`[Executor] Payment execution error:`, error);
+      }
+    } else {
+      console.warn(`[Executor] ⚠️  No Locus service configured - payment not executed`);
+      paymentError = 'No Locus payment service configured';
+    }
+
     const response: PaymentResponse = {
       type: 'payment_response',
       request_id: taskId,
       decision: 'accepted',
-      reason: `Payment of $${request.amount} with ${request.proposed_delay_days || 0} days delay accepted`
+      reason: transactionHash
+        ? `Payment of $${request.amount} executed successfully. TX: ${transactionHash}`
+        : paymentError
+          ? `Payment accepted but execution failed: ${paymentError}`
+          : `Payment of $${request.amount} with ${request.proposed_delay_days || 0} days delay accepted`
     };
 
     taskStore.setMetadata(taskId, 'response', response);
+    if (transactionHash) {
+      taskStore.setMetadata(taskId, 'transactionHash', transactionHash);
+    }
 
     const message: Message = {
       kind: 'message',
@@ -308,7 +380,11 @@ export class PaymentNegotiationExecutor implements AgentExecutor {
       parts: [
         {
           kind: 'text',
-          text: `Accepted payment request for $${request.amount} ${request.currency}`
+          text: transactionHash
+            ? `✅ Payment executed! $${request.amount} ${request.currency}\nTransaction: ${transactionHash}`
+            : paymentError
+              ? `⚠️  Accepted but payment failed: ${paymentError}`
+              : `Accepted payment request for $${request.amount} ${request.currency}`
         },
         { kind: 'data', data: response as unknown as Record<string, unknown> }
       ],

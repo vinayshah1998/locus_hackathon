@@ -14,28 +14,38 @@ import { PaymentNegotiationExecutor } from './payment-executor.js';
 import { getPersonality } from './personality.js';
 import { AgentRegistry } from './agent-client.js';
 import { ConversationalAgent } from './conversational-agent.js';
+import { LocusPaymentService } from './locus-payment-service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuration from environment
 const AGENT_PORT = parseInt(process.env.AGENT_PORT || '4000', 10);
-const AGENT_NAME = process.env.AGENT_NAME || `Agent-${AGENT_PORT}`;
-const AGENT_WALLET = process.env.AGENT_WALLET_ADDRESS || `0xAGENT_${AGENT_PORT}`;
+const AGENT_IDENTITY = process.env.AGENT_IDENTITY || 'vinay'; // 'vinay' or 'dhruv'
+const AGENT_NAME = process.env.AGENT_NAME || (AGENT_IDENTITY === 'vinay' ? 'Vinay' : 'Dhruv');
 const AGENT_PERSONALITY = process.env.AGENT_PERSONALITY || 'balanced';
-const AGENT_API_KEY = process.env.AGENT_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Hardcoded agent network - Alice and Bob know about each other
+// Get identity-specific configuration
+const LOCUS_API_KEY = AGENT_IDENTITY === 'vinay'
+  ? process.env.VINAY_LOCUS_API_KEY
+  : process.env.DHRUV_LOCUS_API_KEY;
+
+const AGENT_WALLET = AGENT_IDENTITY === 'vinay'
+  ? process.env.VINAY_WALLET_ADDRESS || '0xVINAY_WALLET_MISSING'
+  : process.env.DHRUV_WALLET_ADDRESS || '0xDHRUV_WALLET_MISSING';
+
+// Agent network - Vinay and Dhruv know about each other
 const KNOWN_AGENTS: Record<string, { name: string; wallet: string; url: string }> = {
-  alice: {
-    name: 'Alice',
-    wallet: '0xALICE_WALLET',
-    url: 'http://localhost:4000'
+  vinay: {
+    name: 'Vinay',
+    wallet: process.env.VINAY_WALLET_ADDRESS || '0xVINAY_WALLET',
+    url: process.env.VINAY_AGENT_URL || 'http://localhost:4000'
   },
-  bob: {
-    name: 'Bob',
-    wallet: '0xBOB_WALLET',
-    url: 'http://localhost:4001'
+  dhruv: {
+    name: 'Dhruv',
+    wallet: process.env.DHRUV_WALLET_ADDRESS || '0xDHRUV_WALLET',
+    url: process.env.DHRUV_AGENT_URL || 'http://localhost:4001'
   }
 };
 
@@ -52,10 +62,33 @@ async function main(): Promise<void> {
   const personality = getPersonality(AGENT_PERSONALITY);
   console.log(`📋 Agent Configuration:`);
   console.log(`   Name: ${AGENT_NAME}`);
+  console.log(`   Identity: ${AGENT_IDENTITY}`);
   console.log(`   Port: ${AGENT_PORT}`);
   console.log(`   Wallet: ${AGENT_WALLET}`);
   console.log(`   Personality: ${personality.name}`);
   console.log(`   - ${personality.description}`);
+  console.log();
+
+  // Verify Locus API key is configured
+  if (!LOCUS_API_KEY) {
+    console.error(`❌ Error: Missing Locus API key for ${AGENT_IDENTITY}`);
+    console.error(`   Please set ${AGENT_IDENTITY === 'vinay' ? 'VINAY_LOCUS_API_KEY' : 'DHRUV_LOCUS_API_KEY'} in .env`);
+    process.exit(1);
+  }
+
+  if (!ANTHROPIC_API_KEY) {
+    console.error(`❌ Error: Missing ANTHROPIC_API_KEY in .env`);
+    process.exit(1);
+  }
+
+  // Create Locus Payment Service
+  console.log('💳 Initializing Locus Payment Service...');
+  const locusPaymentService = new LocusPaymentService(LOCUS_API_KEY, ANTHROPIC_API_KEY);
+
+  // Note about credit server
+  const creditServerUrl = process.env.CREDIT_SERVER_URL || 'http://localhost:8000';
+  console.log(`📊 Credit server configured at: ${creditServerUrl}`);
+  console.log(`   (Payments will work even if credit server is offline)`);
   console.log();
 
   // Create Agent Card
@@ -65,19 +98,20 @@ async function main(): Promise<void> {
   // Create Task Store
   const taskStore = new TaskStore();
 
-  // Create Executor
+  // Create Executor with Locus Payment Service
   const executor = new PaymentNegotiationExecutor({
     personality,
     walletAddress: AGENT_WALLET,
-    agentName: AGENT_NAME
+    agentName: AGENT_NAME,
+    locusPaymentService
   });
 
-  // Create A2A Server
+  // Create A2A Server (no apiKey = no auth required for agent-to-agent communication)
   const server = new A2AServer({
     agentCard,
     taskStore,
-    executor,
-    apiKey: AGENT_API_KEY
+    executor
+    // apiKey: ANTHROPIC_API_KEY  // Removed - agents trust each other
   });
 
   const app = server.getExpressApp();
@@ -112,9 +146,9 @@ async function main(): Promise<void> {
     console.log('─'.repeat(60));
     console.log('Natural Language Interface:');
     console.log('  Just type naturally! Examples:');
-    console.log('  "Ask bob to pay me $50 for dinner"');
-    console.log('  "Request $100 from alice, she can pay in 14 days"');
-    console.log('  "Tell bob I need the $200 he owes me today"');
+    console.log(`  "Ask ${AGENT_IDENTITY === 'vinay' ? 'dhruv' : 'vinay'} to pay me $50 for dinner"`);
+    console.log(`  "Request $100 from ${AGENT_IDENTITY === 'vinay' ? 'dhruv' : 'vinay'}, they can pay in 14 days"`);
+    console.log(`  "Tell ${AGENT_IDENTITY === 'vinay' ? 'dhruv' : 'vinay'} I need the $200 they owe me today"`);
     console.log('');
     console.log('CLI Commands:');
     console.log('  tasks      - List active tasks');
@@ -326,10 +360,11 @@ async function main(): Promise<void> {
   }
 
   function showHelp(): void {
+    const otherAgent = AGENT_IDENTITY === 'vinay' ? 'dhruv' : 'vinay';
     console.log('Natural Language Examples:');
-    console.log('  "Ask bob to pay me $50 for dinner"');
-    console.log('  "Request $100 from alice, she can pay in 14 days"');
-    console.log('  "Tell bob I need the $200 he owes me today"');
+    console.log(`  "Ask ${otherAgent} to pay me $50 for dinner"`);
+    console.log(`  "Request $100 from ${otherAgent}, they can pay in 14 days"`);
+    console.log(`  "Tell ${otherAgent} I need the $200 they owe me today"`);
     console.log('');
     console.log('CLI Commands:');
     console.log('  tasks                        - List all active tasks');

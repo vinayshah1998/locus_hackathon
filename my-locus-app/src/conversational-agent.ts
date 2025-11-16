@@ -40,7 +40,7 @@ POSSIBLE INTENTS:
 4. unknown - Cannot determine intent
 
 For payment_request, extract:
-- targetAgent: Name of the person (bob, alice, etc.)
+- targetAgent: Name of the person (vinay, dhruv, etc.)
 - amount: Dollar amount (number)
 - currency: USD (default)
 - delayDays: Number of days for payment (0 = today/immediate)
@@ -52,10 +52,10 @@ For respond_to_offer, extract:
 - counterDelayDays: If countering with different delay
 
 EXAMPLES:
-"Ask bob to pay me $50 for dinner" → {"type":"payment_request","targetAgent":"bob","amount":50,"currency":"USD","delayDays":0,"reason":"dinner"}
-"Tell alice I need the $100 she owes me today" → {"type":"payment_request","targetAgent":"alice","amount":100,"currency":"USD","delayDays":0,"reason":"money owed"}
-"Request $500 from bob, he can pay in 30 days" → {"type":"payment_request","targetAgent":"bob","amount":500,"currency":"USD","delayDays":30}
-"I accept bob's offer" → {"type":"respond_to_offer","response":"accept"}
+"Ask dhruv to pay me $50 for dinner" → {"type":"payment_request","targetAgent":"dhruv","amount":50,"currency":"USD","delayDays":0,"reason":"dinner"}
+"Tell vinay I need the $100 he owes me today" → {"type":"payment_request","targetAgent":"vinay","amount":100,"currency":"USD","delayDays":0,"reason":"money owed"}
+"Request $500 from dhruv, he can pay in 30 days" → {"type":"payment_request","targetAgent":"dhruv","amount":500,"currency":"USD","delayDays":30}
+"I accept dhruv's offer" → {"type":"respond_to_offer","response":"accept"}
 "Counter with $0.50 instead" → {"type":"respond_to_offer","response":"counter","counterAmount":0.5}
 
 RESPOND WITH ONLY THE JSON OBJECT, NO OTHER TEXT.`;
@@ -76,9 +76,9 @@ export class ConversationalAgent {
 
     if (intent.type === 'unknown') {
       return `I didn't understand that. Try saying something like:\n` +
-        `- "Ask bob to pay me $50 for dinner"\n` +
-        `- "Request $100 from alice, she can pay in 14 days"\n` +
-        `- "Tell bob I need the money he owes me today"`;
+        `- "Ask dhruv to pay me $50 for dinner"\n` +
+        `- "Request $100 from vinay, they can pay in 14 days"\n` +
+        `- "Tell dhruv I need the money they owe me today"`;
     }
 
     if (intent.type === 'payment_request') {
